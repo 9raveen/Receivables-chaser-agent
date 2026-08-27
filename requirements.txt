@@ -1,0 +1,27 @@
+# --- data / ML ---
+pandas
+numpy
+pyarrow
+scikit-learn
+xgboost
+lightgbm
+shap
+faker
+
+# --- agent ---
+langgraph
+langchain-core
+langsmith
+anthropic
+
+# --- backend / dashboard ---
+fastapi
+uvicorn
+pydantic
+streamlit
+requests
+
+# --- utils ---
+python-dotenv
+pyyaml
+pytest

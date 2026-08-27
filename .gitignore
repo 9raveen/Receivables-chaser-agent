@@ -1,0 +1,44 @@
+# --- Python ---
+
+venv/
+**pycache**/
+_.pyc
+_.pyo
+.Python
+\*.egg-info/
+
+# --- environment / secrets ---
+
+.env
+
+# --- generated data (raw source stays out too — Kaggle CSV, redistribute
+
+# license unclear; everyone should download their own copy) ---
+
+data/raw/_.csv
+data/processed/_.parquet
+data/processed/models/_.json
+data/synthetic/_.json
+data/demo_batch/\*.json
+
+# keep folder structure without committing generated contents
+
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/synthetic/.gitkeep
+!data/demo_batch/.gitkeep
+
+# --- generated figures (regeneratable via src/models/explain.py) ---
+
+docs/figures/\*.png
+
+# --- logs (hash-chained audit log output, Day 7+) ---
+
+logs/\*.jsonl
+
+# --- OS / editor ---
+
+.DS_Store
+\*.ipynb_checkpoints
+.vscode/
+.idea/
