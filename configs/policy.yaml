@@ -1,0 +1,21 @@
+risk_tiers:
+  low_max: 0.35
+  medium_max: 0.65
+  # >= medium_max is HIGH
+
+overdue_ratio_thresholds:
+  medium_firm: 0.5 # MEDIUM tier: firm_reminder if overdue_ratio > this
+  high_formal: 0.35 # HIGH tier: formal_notice if overdue_ratio > this
+
+promise_keep:
+  low_keep_score: 0.4 # below this, shorten follow-up grace period
+
+stopping_rules:
+  max_attempts: 5
+  contact_window_start_hour: 9
+  contact_window_end_hour: 21
+  no_contact_days: ["Sunday"]
+
+hitl:
+  min_extraction_confidence: 0.6
+  max_consecutive_broken_promises: 2
