@@ -28,6 +28,7 @@ from src.agent.inference import get_customer_history, get_shap_contributions
 from src.agent.llm_utils import call_with_structured_output
 from src.agent.nodes.stopping import _within_contact_window
 from src.agent.state import InvoiceState
+from src.adapters.razorpay_adapter import get_or_create_payment_link
 from src.data.schema import ContactAttempt, ContactChannel, ContactTone
 from src.utils.config import load_policy
 
@@ -77,7 +78,7 @@ def _humanize_reasons(contributions: list[tuple[str, float]]) -> list[str]:
     return reasons
 
 
-def _build_prompt(state: InvoiceState, human_reasons: list[str], tone: str) -> str:
+def _build_prompt(state: InvoiceState, human_reasons: list[str], tone: str, payment_link: str | None) -> str:
     tone_guidance = TONE_GUIDANCE.get(tone, "professional and courteous")
     days_overdue = max((date.today() - state["due_date"]).days, 0)
 
@@ -90,6 +91,19 @@ def _build_prompt(state: InvoiceState, human_reasons: list[str], tone: str) -> s
         )
     else:
         reason_text = "No specific risk signal to cite — write a standard reminder."
+
+    if payment_link:
+        payment_instruction = (
+            f"A real payment link has been generated: {payment_link}\n"
+            "Include this link naturally as the primary call-to-action (e.g. 'you can pay directly "
+            "here:'), instead of asking for UTR/remittance details as the main ask — the link IS the "
+            "action you want them to take."
+        )
+    else:
+        payment_instruction = (
+            "No payment link is available for this message — ask them to share the UTR or transaction "
+            "reference once paid, or remittance details if already paid."
+        )
 
     return f"""You are drafting a B2B accounts-receivable follow-up message for an
 Indian MSME context (payments in INR). This is a real business relationship,
@@ -104,6 +118,8 @@ Days overdue: {days_overdue}
 Required tone: {tone_guidance}
 
 {reason_text}
+
+{payment_instruction}
 
 Do not fabricate any facts not given above (no invented company names,
 no invented prior conversations, no legal threats beyond what the tone
@@ -122,7 +138,9 @@ def draft_outreach(state: InvoiceState) -> InvoiceState:
     channels = state["intervention_channels"] or ["email"]
     channel = channels[0]
 
-    prompt = _build_prompt(state, human_reasons, tone)
+    payment_link = get_or_create_payment_link(invoice)
+
+    prompt = _build_prompt(state, human_reasons, tone, payment_link)
     draft = call_with_structured_output(prompt, OutreachDraft)
 
     now = datetime.now()
@@ -148,6 +166,7 @@ def draft_outreach(state: InvoiceState) -> InvoiceState:
         tone=tone,
         channel=channel,
         sent_at=now,
+        payment_link=payment_link,
     )
 
     new_hash = write_entry(
@@ -155,7 +174,8 @@ def draft_outreach(state: InvoiceState) -> InvoiceState:
         node="draft_outreach",
         decision="drafted",
         reason=f"drafted {tone} outreach via {channel}"
-               + (f", citing: {'; '.join(human_reasons)}" if human_reasons else ", no specific reason cited"),
+               + (f", citing: {'; '.join(human_reasons)}" if human_reasons else ", no specific reason cited")
+               + (f", payment_link={payment_link}" if payment_link else ", no payment link generated"),
         prev_hash=state["prev_audit_hash"],
     )
 
