@@ -1,18 +1,16 @@
 """
 Day 7 — check_stopping_conditions node.
+Day 8 — payment_detected/disputed/pending_promise are now DERIVED from the
+real PaymentEvent/PromiseEvent logs and the current invoice record (via
+src/agent/event_log.py), closing the gap flagged in handoff §7: these were
+previously manual function arguments the caller had to supply, rather than
+being read from the append-only logs Day 2's schema design intended.
 
 The compliance-critical gate (agent-policy-spec.md §3). Must run BEFORE
 select_intervention on every cycle — that ordering is what makes these
 rules actually binding rather than advisory. The LLM (Day 8) never gets a
 chance to decide whether to honor a stopping rule; this node decides it in
 plain code before the LLM is even invoked.
-
-External signals (payment_detected, disputed, pending_promise) are passed
-in rather than baked into state, because in the real system they come from
-the PaymentEvent / PromiseEvent append-only logs (src/data/schema.py),
-not from a single mutable flag on the invoice — exactly the design
-decision made in Day 2's schema (state is derived by reading event
-history, never trusted from an overwritten field).
 """
 
 from __future__ import annotations
@@ -20,6 +18,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from src.agent.audit_log import write_entry
+from src.agent.event_log import get_dispute_status, get_payment_status, get_pending_promise
 from src.agent.state import InvoiceState
 from src.utils.config import load_policy
 
@@ -37,13 +36,15 @@ def _within_contact_window(now: datetime, policy: dict) -> bool:
 
 def check_stopping_conditions(
     state: InvoiceState,
-    payment_detected: bool = False,
-    disputed: bool = False,
-    pending_promise: bool = False,
     now: datetime | None = None,
 ) -> InvoiceState:
     now = now or datetime.now()
     policy = load_policy()
+
+    invoice_id = state["invoice_id"]
+    payment_detected = get_payment_status(invoice_id)
+    disputed = get_dispute_status(invoice_id)
+    pending_promise = get_pending_promise(invoice_id) is not None
 
     decision: str
     reason: str
