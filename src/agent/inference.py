@@ -40,6 +40,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import shap
 import xgboost as xgb
 
 from src.data.schema import Invoice, MIN_HISTORY_INVOICES
@@ -88,6 +89,7 @@ _promise_keep_model: xgb.XGBClassifier | None = None
 _train_dummy_columns: list[str] | None = None
 _terms_code_encoding: dict | None = None
 _pk_pool_mean_late_rate: float | None = None
+_shap_explainer: shap.TreeExplainer | None = None
 
 
 def _load_propensity_model() -> xgb.XGBClassifier:
@@ -157,6 +159,18 @@ def _load_promise_keep_pool_mean_late_rate() -> float:
         rates = [c.late_rate for c in customers if c.late_rate is not None]
         _pk_pool_mean_late_rate = sum(rates) / len(rates)
     return _pk_pool_mean_late_rate
+
+
+def _load_shap_explainer() -> shap.TreeExplainer:
+    """
+    Cached module-level, same reasoning as the model/encoding caches above
+    — TreeExplainer construction only depends on the model, not the data
+    being explained, so it's wasteful to rebuild it per invoice.
+    """
+    global _shap_explainer
+    if _shap_explainer is None:
+        _shap_explainer = shap.TreeExplainer(_load_propensity_model())
+    return _shap_explainer
 
 
 # --- customer history ------------------------------------------------------
@@ -277,6 +291,44 @@ def _encode_for_inference(feature_row: pd.DataFrame) -> pd.DataFrame:
     )
     encoded = encoded.reindex(columns=train_columns, fill_value=0)
     return encoded
+
+
+def get_shap_contributions(invoice: Invoice, history_df: pd.DataFrame, top_n: int = 3) -> list[tuple[str, float]]:
+    """
+    Structured version of the top-N SHAP contributions — (feature_name,
+    shap_value) pairs, same selection logic as get_shap_explanation below.
+    Exists so callers that need the feature name itself (e.g.
+    draft_outreach.py mapping it to plain language) don't have to parse a
+    formatted string back apart.
+    """
+    feature_row = build_single_invoice_features(invoice, history_df)
+    encoded = _encode_for_inference(feature_row)
+
+    explainer = _load_shap_explainer()
+    shap_values = explainer(encoded)
+
+    contributions = pd.Series(
+        shap_values.values[0], index=encoded.columns
+    ).sort_values(key=abs, ascending=False)
+
+    return [(feat, float(val)) for feat, val in contributions.head(top_n).items()]
+
+
+def get_shap_explanation(invoice: Invoice, history_df: pd.DataFrame, top_n: int = 3) -> list[str]:
+    """
+    Single-invoice equivalent of explain.py's explain_single_invoice — same
+    top-N-by-|SHAP value| selection and "increases/decreases risk" wording,
+    but built for one live invoice's already-encoded feature row instead of
+    indexing into a batch X_test, and RETURNS strings instead of printing.
+    Formats get_shap_contributions() above into the human-scannable (but
+    still feature-name-level, not buyer-facing) strings this was originally
+    tested against.
+    """
+    reasons = []
+    for feat, val in get_shap_contributions(invoice, history_df, top_n=top_n):
+        direction = "increases" if val > 0 else "decreases"
+        reasons.append(f"{feat} {direction} risk (SHAP contribution: {val:+.3f})")
+    return reasons
 
 
 # --- scoring ---------------------------------------------------------------
