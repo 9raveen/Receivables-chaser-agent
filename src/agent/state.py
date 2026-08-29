@@ -42,6 +42,11 @@ class InvoiceState(TypedDict):
     intervention_tone: Optional[str]
     intervention_channels: Optional[list[str]]
 
+    # Day 8: set by parse_response, read by the HITL conditional edge.
+    extraction_confidence: Optional[float]   # None until a reply has been parsed
+    hostile_tone: Optional[bool]
+    last_extracted_intent: Optional[str]     # e.g. "promise_to_pay" | "dispute" | "payment_confirmation"
+
     prev_audit_hash: str                    # for the hash-chained log (Day 7 audit_log.py)
 
 
@@ -88,5 +93,8 @@ def make_initial_state(
         stop_reason=None,
         intervention_tone=None,
         intervention_channels=None,
+        extraction_confidence=None,
+        hostile_tone=None,
+        last_extracted_intent=None,
         prev_audit_hash="GENESIS",
     )
