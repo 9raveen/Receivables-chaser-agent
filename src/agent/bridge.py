@@ -14,12 +14,43 @@ Invoice -> real propensity_score -> make_initial_state().
 
 from __future__ import annotations
 
+import json
 from datetime import date
+from pathlib import Path
 from typing import Optional
 
 from src.agent.inference import get_customer_history, score_invoice
 from src.agent.state import InvoiceState, make_initial_state
 from src.data.schema import Invoice
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEMO_BATCH_PATH = PROJECT_ROOT / "data" / "synthetic" / "demo_batch.json"
+
+
+def get_invoice_by_id(invoice_id: str) -> Invoice:
+    """
+    Re-fetches a full schema.Invoice by ID from the current invoice source
+    (data/synthetic/demo_batch.json for now — same swappable-source pattern
+    as inference.py's get_customer_history / event_log.py's
+    get_dispute_status, a Razorpay-backed lookup later replaces this
+    function's body only).
+
+    Needed because InvoiceState (the TypedDict that flows through the
+    graph) only carries a subset of Invoice's fields — nodes that need the
+    full object (e.g. draft_outreach.py, for SHAP explanation which needs
+    business_unit/currency/payment_terms_code) have to look it up again by
+    invoice_id rather than trust state to carry everything.
+
+    Raises ValueError if the invoice_id isn't found — deliberately loud
+    rather than returning None, since a node calling this expects the
+    invoice to exist (it already has an invoice_id from state).
+    """
+    with open(DEMO_BATCH_PATH) as f:
+        batch = json.load(f)
+    for rec in batch:
+        if rec["invoice_id"] == invoice_id:
+            return Invoice(**rec)
+    raise ValueError(f"Invoice {invoice_id} not found in {DEMO_BATCH_PATH}")
 
 
 def invoice_to_state(invoice: Invoice, as_of: Optional[date] = None) -> InvoiceState:
