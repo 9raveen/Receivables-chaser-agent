@@ -71,6 +71,7 @@ def append_outreach_draft(
     tone: str,
     channel: str,
     sent_at,
+    payment_link: str | None = None,
 ) -> None:
     """
     NOT part of schema.py — ContactAttempt (Day 2) tracks that an attempt
@@ -79,7 +80,8 @@ def append_outreach_draft(
     beyond what the original schema defined, not silently invented: the
     real drafted text needs to live SOMEWHERE for audit/demo purposes, and
     extending ContactAttempt itself would touch a shared schema file other
-    modules already depend on.
+    modules already depend on. payment_link (Day 9) is None when no real
+    Razorpay link was generated/available for this draft.
     """
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     record = {
@@ -90,6 +92,7 @@ def append_outreach_draft(
         "tone": tone,
         "channel": channel,
         "sent_at": sent_at.isoformat() if hasattr(sent_at, "isoformat") else sent_at,
+        "payment_link": payment_link,
     }
     with open(OUTREACH_DRAFTS_PATH, "a") as f:
         f.write(json.dumps(record) + "\n")
