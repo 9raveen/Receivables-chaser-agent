@@ -30,7 +30,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
-from src.data.schema import PaymentEvent, PaymentEventType, PromiseEvent
+from src.data.schema import ContactAttempt, PaymentEvent, PaymentEventType, PromiseEvent
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LOGS_DIR = PROJECT_ROOT / "logs"
@@ -38,6 +38,8 @@ SYNTHETIC_DIR = PROJECT_ROOT / "data" / "synthetic"
 
 PAYMENT_EVENTS_PATH = LOGS_DIR / "payment_events.jsonl"
 PROMISE_EVENTS_PATH = LOGS_DIR / "promise_events.jsonl"
+CONTACT_ATTEMPTS_PATH = LOGS_DIR / "contact_attempts.jsonl"
+OUTREACH_DRAFTS_PATH = LOGS_DIR / "outreach_drafts.jsonl"
 DEMO_BATCH_PATH = SYNTHETIC_DIR / "demo_batch.json"
 
 
@@ -53,6 +55,44 @@ def append_promise_event(event: PromiseEvent) -> None:
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     with open(PROMISE_EVENTS_PATH, "a") as f:
         f.write(json.dumps(event.model_dump(mode="json")) + "\n")
+
+
+def append_contact_attempt(event: ContactAttempt) -> None:
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(CONTACT_ATTEMPTS_PATH, "a") as f:
+        f.write(json.dumps(event.model_dump(mode="json")) + "\n")
+
+
+def append_outreach_draft(
+    invoice_id: str,
+    attempt_number: int,
+    subject: str,
+    body: str,
+    tone: str,
+    channel: str,
+    sent_at,
+) -> None:
+    """
+    NOT part of schema.py — ContactAttempt (Day 2) tracks that an attempt
+    happened (channel/tone/timestamp) but has no field for the actual
+    drafted message text. This is a Day 8 addition, flagged since it's
+    beyond what the original schema defined, not silently invented: the
+    real drafted text needs to live SOMEWHERE for audit/demo purposes, and
+    extending ContactAttempt itself would touch a shared schema file other
+    modules already depend on.
+    """
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    record = {
+        "invoice_id": invoice_id,
+        "attempt_number": attempt_number,
+        "subject": subject,
+        "body": body,
+        "tone": tone,
+        "channel": channel,
+        "sent_at": sent_at.isoformat() if hasattr(sent_at, "isoformat") else sent_at,
+    }
+    with open(OUTREACH_DRAFTS_PATH, "a") as f:
+        f.write(json.dumps(record) + "\n")
 
 
 # --- readers (internal) -----------------------------------------------------
