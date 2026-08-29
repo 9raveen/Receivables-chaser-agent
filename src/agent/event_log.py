@@ -164,3 +164,20 @@ def get_pending_promise(invoice_id: str) -> Optional[dict]:
         if e.get("kept") is None:
             return e
     return None
+
+
+def get_broken_promise_streak(invoice_id: str) -> int:
+    """
+    Counts consecutive BROKEN (kept=False) promises, most recent first,
+    stopping at the first promise that was kept (True) or is still
+    unresolved (None) — or when events run out. Feeds the Day 6 HITL
+    trigger "2+ broken promises" (src/agent/nodes/hitl.py).
+    """
+    events = _read_promise_events(invoice_id)
+    streak = 0
+    for e in reversed(events):
+        if e.get("kept") is False:
+            streak += 1
+        else:
+            break
+    return streak
