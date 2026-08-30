@@ -1,5 +1,19 @@
 """
 Day 7 — Hash-chained audit log.
+Day 9 — MIGRATED from a JSONL file to Postgres (Neon). _compute_hash and
+verify_chain are UNCHANGED from the original Day 7 source — the hashing
+algorithm itself was never touched, only where entries are persisted and
+read from. This matters: verify_chain must produce identical results for
+entries written before and after this migration, or the compliance story
+breaks.
+
+CORRECTNESS NOTE: `timestamp` is stored as TEXT, not TIMESTAMPTZ. The
+original code calls datetime.now(timezone.utc).isoformat() and hashes
+that STRING — if this were stored as a native timestamp column, reading
+it back would produce a Python datetime that re-serializes slightly
+differently (formatting, precision) than the original string, and
+verify_chain would report every entry as tampered even though nothing
+changed. Storing the exact original string sidesteps that entirely.
 
 Every node transition writes one entry. this_hash = sha256(prev_hash +
 entry_content), so tampering with any entry breaks the chain from that
@@ -17,9 +31,8 @@ import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
-LOG_PATH = Path(__file__).resolve().parents[2] / "logs" / "audit_log.jsonl"
+from src.agent.db import get_connection
 
 GENESIS_HASH = "GENESIS"
 
@@ -50,22 +63,42 @@ def write_entry(
     this_hash = _compute_hash(prev_hash, entry_content)
     entry_content["this_hash"] = this_hash
 
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(LOG_PATH, "a") as f:
-        f.write(json.dumps(entry_content, default=str) + "\n")
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO audit_log
+                   (entry_id, invoice_id, timestamp, node, decision, reason, prev_hash, this_hash)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                (entry_content["entry_id"], invoice_id, entry_content["timestamp"],
+                 node, decision, reason, prev_hash, this_hash),
+            )
+        conn.commit()
 
     return this_hash
 
 
 def read_all_entries() -> list[dict]:
-    if not LOG_PATH.exists():
-        return []
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT entry_id, invoice_id, timestamp, node, decision,
+                          reason, prev_hash, this_hash
+                   FROM audit_log ORDER BY id ASC"""
+            )
+            rows = cur.fetchall()
+
     entries = []
-    with open(LOG_PATH) as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                entries.append(json.loads(line))
+    for row in rows:
+        entries.append({
+            "entry_id": row[0],
+            "invoice_id": row[1],
+            "timestamp": row[2],
+            "node": row[3],
+            "decision": row[4],
+            "reason": row[5],
+            "prev_hash": row[6],
+            "this_hash": row[7],
+        })
     return entries
 
 
@@ -74,6 +107,7 @@ def verify_chain(invoice_id: str | None = None) -> tuple[bool, str | None]:
     Recomputes every hash from scratch and checks it matches what was
     stored. Returns (is_valid, first_broken_entry_id_or_None).
     If invoice_id is given, only that invoice's chain is checked.
+    UNCHANGED from the original Day 7 source.
     """
     entries = read_all_entries()
     if invoice_id is not None:
@@ -89,8 +123,9 @@ def verify_chain(invoice_id: str | None = None) -> tuple[bool, str | None]:
 
 
 if __name__ == "__main__":
-    # smoke test: write a short chain, verify it, then tamper and verify
-    # it correctly detects the tamper
+    # smoke test: write a short chain, verify it, then tamper via a direct
+    # SQL UPDATE (leaving this_hash untouched, same as the original file-
+    # based test tampered the JSONL directly) and verify it's detected.
     h0 = GENESIS_HASH
     h1 = write_entry("TEST-001", "score_and_route", "risk_tier=HIGH", "propensity 0.81", h0)
     h2 = write_entry("TEST-001", "select_intervention", "formal_notice", "HIGH tier, overdue_ratio 0.6", h1)
@@ -98,15 +133,14 @@ if __name__ == "__main__":
     valid, broken = verify_chain("TEST-001")
     print(f"Chain valid before tamper: {valid}")
 
-    # tamper: rewrite the log file with one entry's decision changed but
-    # hash left as-is, to prove verify_chain catches it
-    entries = read_all_entries()
-    for e in entries:
-        if e["invoice_id"] == "TEST-001" and e["node"] == "select_intervention":
-            e["decision"] = "friendly_reminder"  # tampered, hash now stale
-    with open(LOG_PATH, "w") as f:
-        for e in entries:
-            f.write(json.dumps(e, default=str) + "\n")
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE audit_log SET decision = %s
+                   WHERE invoice_id = %s AND node = %s""",
+                ("friendly_reminder", "TEST-001", "select_intervention"),
+            )
+        conn.commit()
 
     valid, broken = verify_chain("TEST-001")
     print(f"Chain valid after tamper: {valid} (broken entry: {broken})")
