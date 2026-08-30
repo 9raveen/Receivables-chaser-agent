@@ -106,7 +106,7 @@ if __name__ == "__main__":
     import json
     from pathlib import Path
 
-    from langgraph.checkpoint.sqlite import SqliteSaver
+    from langgraph.checkpoint.postgres import PostgresSaver
     from langgraph.types import Command
 
     from src.agent.bridge import invoice_to_state
@@ -116,8 +116,10 @@ if __name__ == "__main__":
     with open(demo_batch_path) as f:
         demo_batch = json.load(f)
 
-    db_path = Path(__file__).resolve().parents[2] / "logs" / "agent_checkpoints.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    import os
+
+    from dotenv import load_dotenv
+    load_dotenv()
 
     # DEMO-0003 — same test invoice used throughout, real history (n_prior: 15)
     inv = Invoice(**demo_batch[2])
@@ -128,8 +130,11 @@ if __name__ == "__main__":
     # this test validates the real node logic (extraction, HITL routing,
     # promise scoring, the stopping-rule bug fix), not persistence across a
     # process restart. That mechanic was already verified separately via
-    # scratch_interrupt_test.py's two-separate-`python`-invocations test.
-    with SqliteSaver.from_conn_string(str(db_path)) as checkpointer:
+    # scratch_interrupt_test.py's two-separate-`python`-invocations test
+    # (against SqliteSaver — Postgres uses the identical interrupt/resume
+    # API, per LangGraph's own docs, so that verification still applies).
+    with PostgresSaver.from_conn_string(os.environ["DATABASE_URL"]) as checkpointer:
+        checkpointer.setup()  # only needs to actually create tables once; safe to call every run
         app = build_graph(checkpointer)
 
         print("=== First invoke: score -> ... -> draft_outreach -> pause at parse_response ===")
