@@ -1,26 +1,23 @@
 """
 Day 8 — Event log lookups.
+Day 9 — MIGRATED from append-only JSONL files to Postgres (Neon). Public
+function signatures are UNCHANGED from Day 8 — every caller (stopping.py,
+hitl.py, draft_outreach.py, parse_response.py) needed zero changes, since
+this module was always the seam between "how state is derived" and "where
+it's stored." Only the storage mechanism moved.
 
-Closes the gap noted in handoff §7: check_stopping_conditions previously
-took payment_detected/disputed/pending_promise as manual function
-arguments, rather than deriving them from the PaymentEvent/PromiseEvent
-append-only logs Day 2's schema design intended. Nothing in Days 1-7 ever
-wrote one of these logs anywhere — this module is both the writer and the
-reader.
+Reason for the migration (see chat): a deployed backend on typical free
+hosting doesn't guarantee persistent disk across restarts — JSONL files
+would silently lose history between judge visits. Postgres (Neon free
+tier) fixes that.
 
-Storage: same append-only JSONL pattern as src/agent/audit_log.py
-(logs/audit_log.jsonl) — logs/payment_events.jsonl, logs/promise_events.jsonl.
-One JSON object per line, gitignored, loaded fully into memory on read
-(same known non-production-scale caveat already documented for the audit
-log in handoff §7 — fine at hackathon scale).
-
-IMPORTANT ASYMMETRY, not an oversight: `disputed` is a plain boolean field
-on schema.Invoice itself, not an event type — schema.py has no
-DisputeEvent. So get_dispute_status() can't read from an append-only log
-the way payment/promise do; it reads the CURRENT invoice record instead,
-sourced from data/synthetic/demo_batch.json for now (same swappable-source
-pattern as inference.py's get_customer_history — a Razorpay-backed lookup
-later replaces this function's body only).
+IMPORTANT ASYMMETRY, unchanged from Day 8: `disputed` is a plain boolean
+field on schema.Invoice itself, not an event type — schema.py has no
+DisputeEvent, so get_dispute_status() still reads the CURRENT invoice
+record from data/synthetic/demo_batch.json, not a database table. That
+file is static reference data (never written to), so it doesn't need to
+move to Postgres — the ephemeral-storage risk this migration solves only
+applies to things the agent WRITES at runtime.
 """
 
 from __future__ import annotations
@@ -30,37 +27,56 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
+from src.agent.db import get_connection
 from src.data.schema import ContactAttempt, PaymentEvent, PaymentEventType, PromiseEvent
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-LOGS_DIR = PROJECT_ROOT / "logs"
 SYNTHETIC_DIR = PROJECT_ROOT / "data" / "synthetic"
-
-PAYMENT_EVENTS_PATH = LOGS_DIR / "payment_events.jsonl"
-PROMISE_EVENTS_PATH = LOGS_DIR / "promise_events.jsonl"
-CONTACT_ATTEMPTS_PATH = LOGS_DIR / "contact_attempts.jsonl"
-OUTREACH_DRAFTS_PATH = LOGS_DIR / "outreach_drafts.jsonl"
 DEMO_BATCH_PATH = SYNTHETIC_DIR / "demo_batch.json"
 
 
 # --- writers ---------------------------------------------------------------
 
 def append_payment_event(event: PaymentEvent) -> None:
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(PAYMENT_EVENTS_PATH, "a") as f:
-        f.write(json.dumps(event.model_dump(mode="json")) + "\n")
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO payment_events
+                   (invoice_id, event_type, amount, event_date, source)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (event.invoice_id, event.event_type.value, event.amount,
+                 event.event_date, event.source.value),
+            )
+        conn.commit()
 
 
 def append_promise_event(event: PromiseEvent) -> None:
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(PROMISE_EVENTS_PATH, "a") as f:
-        f.write(json.dumps(event.model_dump(mode="json")) + "\n")
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO promise_events
+                   (invoice_id, promised_amount, promised_date, made_on,
+                    extracted_by, confidence, kept)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (event.invoice_id, event.promised_amount, event.promised_date,
+                 event.made_on, event.extracted_by, event.confidence, event.kept),
+            )
+        conn.commit()
 
 
 def append_contact_attempt(event: ContactAttempt) -> None:
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(CONTACT_ATTEMPTS_PATH, "a") as f:
-        f.write(json.dumps(event.model_dump(mode="json")) + "\n")
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO contact_attempts
+                   (invoice_id, attempt_number, channel, tone, sent_at,
+                    within_contact_window, response_received)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (event.invoice_id, event.attempt_number, event.channel.value,
+                 event.tone.value, event.sent_at, event.within_contact_window,
+                 event.response_received),
+            )
+        conn.commit()
 
 
 def append_outreach_draft(
@@ -71,53 +87,24 @@ def append_outreach_draft(
     tone: str,
     channel: str,
     sent_at,
-    payment_link: str | None = None,
+    payment_link: Optional[str] = None,
 ) -> None:
     """
     NOT part of schema.py — ContactAttempt (Day 2) tracks that an attempt
-    happened (channel/tone/timestamp) but has no field for the actual
-    drafted message text. This is a Day 8 addition, flagged since it's
-    beyond what the original schema defined, not silently invented: the
-    real drafted text needs to live SOMEWHERE for audit/demo purposes, and
-    extending ContactAttempt itself would touch a shared schema file other
-    modules already depend on. payment_link (Day 9) is None when no real
-    Razorpay link was generated/available for this draft.
+    happened but has no field for the actual message text. Day 8 addition,
+    now Postgres-backed.
     """
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    record = {
-        "invoice_id": invoice_id,
-        "attempt_number": attempt_number,
-        "subject": subject,
-        "body": body,
-        "tone": tone,
-        "channel": channel,
-        "sent_at": sent_at.isoformat() if hasattr(sent_at, "isoformat") else sent_at,
-        "payment_link": payment_link,
-    }
-    with open(OUTREACH_DRAFTS_PATH, "a") as f:
-        f.write(json.dumps(record) + "\n")
-
-
-# --- readers (internal) -----------------------------------------------------
-
-def _read_payment_events(invoice_id: str) -> list[dict]:
-    if not PAYMENT_EVENTS_PATH.exists():
-        return []
-    with open(PAYMENT_EVENTS_PATH) as f:
-        events = [json.loads(line) for line in f if line.strip()]
-    events = [e for e in events if e["invoice_id"] == invoice_id]
-    events.sort(key=lambda e: e["event_date"])
-    return events
-
-
-def _read_promise_events(invoice_id: str) -> list[dict]:
-    if not PROMISE_EVENTS_PATH.exists():
-        return []
-    with open(PROMISE_EVENTS_PATH) as f:
-        events = [json.loads(line) for line in f if line.strip()]
-    events = [e for e in events if e["invoice_id"] == invoice_id]
-    events.sort(key=lambda e: e["made_on"])
-    return events
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO outreach_drafts
+                   (invoice_id, attempt_number, subject, body, tone, channel,
+                    sent_at, payment_link)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                (invoice_id, attempt_number, subject, body, tone, channel,
+                 sent_at, payment_link),
+            )
+        conn.commit()
 
 
 # --- public lookups ----------------------------------------------------------
@@ -125,26 +112,29 @@ def _read_promise_events(invoice_id: str) -> list[dict]:
 def get_payment_status(invoice_id: str) -> bool:
     """
     True if this invoice has a FULL_PAYMENT event with no later REVERSAL
-    undoing it. PARTIAL_PAYMENT alone does not count as payment_detected —
-    the stopping rule ("payment detected -> resolved") should only fire on
-    a fully resolved invoice, matching the Day 6 spec's intent.
+    undoing it. PARTIAL_PAYMENT alone does not count.
     """
-    events = _read_payment_events(invoice_id)
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT event_type FROM payment_events
+                   WHERE invoice_id = %s ORDER BY event_date ASC""",
+                (invoice_id,),
+            )
+            rows = cur.fetchall()
+
     paid = False
-    for e in events:
-        if e["event_type"] == PaymentEventType.FULL_PAYMENT.value:
+    for (event_type,) in rows:
+        if event_type == PaymentEventType.FULL_PAYMENT.value:
             paid = True
-        elif e["event_type"] == PaymentEventType.REVERSAL.value:
+        elif event_type == PaymentEventType.REVERSAL.value:
             paid = False
     return paid
 
 
 def get_dispute_status(invoice_id: str) -> bool:
-    """
-    Reads the CURRENT invoice record's `disputed` field — see module
-    docstring on why this isn't log-based like payment/promise. Sourced
-    from data/synthetic/demo_batch.json for now.
-    """
+    """Reads the CURRENT invoice record's `disputed` field — see module
+    docstring on why this stays file-based, not Postgres."""
     if not DEMO_BATCH_PATH.exists():
         return False
     with open(DEMO_BATCH_PATH) as f:
@@ -158,28 +148,52 @@ def get_dispute_status(invoice_id: str) -> bool:
 def get_pending_promise(invoice_id: str) -> Optional[dict]:
     """
     Returns the most recent PromiseEvent (as a dict, matching schema.py's
-    field names) for this invoice where kept is still None — i.e. a
-    promise has been made and its promised_date hasn't yet been evaluated.
-    Returns None if there's no unresolved promise.
+    field names) for this invoice where kept is still NULL. Returns None
+    if there's no unresolved promise.
     """
-    events = _read_promise_events(invoice_id)
-    for e in reversed(events):  # most recent first
-        if e.get("kept") is None:
-            return e
-    return None
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT invoice_id, promised_amount, promised_date, made_on,
+                          extracted_by, confidence, kept
+                   FROM promise_events
+                   WHERE invoice_id = %s AND kept IS NULL
+                   ORDER BY made_on DESC LIMIT 1""",
+                (invoice_id,),
+            )
+            row = cur.fetchone()
+
+    if row is None:
+        return None
+    return {
+        "invoice_id": row[0],
+        "promised_amount": row[1],
+        "promised_date": row[2].isoformat() if isinstance(row[2], date) else row[2],
+        "made_on": row[3].isoformat() if isinstance(row[3], datetime) else row[3],
+        "extracted_by": row[4],
+        "confidence": row[5],
+        "kept": row[6],
+    }
 
 
 def get_broken_promise_streak(invoice_id: str) -> int:
     """
     Counts consecutive BROKEN (kept=False) promises, most recent first,
     stopping at the first promise that was kept (True) or is still
-    unresolved (None) — or when events run out. Feeds the Day 6 HITL
-    trigger "2+ broken promises" (src/agent/nodes/hitl.py).
+    unresolved (NULL) — or when events run out.
     """
-    events = _read_promise_events(invoice_id)
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT kept FROM promise_events
+                   WHERE invoice_id = %s ORDER BY made_on DESC""",
+                (invoice_id,),
+            )
+            rows = cur.fetchall()
+
     streak = 0
-    for e in reversed(events):
-        if e.get("kept") is False:
+    for (kept,) in rows:
+        if kept is False:
             streak += 1
         else:
             break
