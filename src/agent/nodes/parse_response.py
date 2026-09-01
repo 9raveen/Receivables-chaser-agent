@@ -84,6 +84,30 @@ def parse_response(state: InvoiceState) -> InvoiceState:
         "request": "awaiting_buyer_reply",
     })
 
+    if not reply_text or not reply_text.strip():
+        # No reply received (e.g. a scheduled timeout resuming with an
+        # empty string after N days of silence — the "silent" persona
+        # case). Skip LLM extraction entirely — there's nothing to
+        # extract — log it plainly, and let the normal loop-back to
+        # check_stopping_conditions handle it: another outreach attempt
+        # if attempts remain, or exhausted once max_attempts is hit. This
+        # is what actually gives a genuinely silent buyer a real path to
+        # "exhausted" instead of leaving the graph paused forever.
+        new_hash = write_entry(
+            invoice_id=state["invoice_id"],
+            node="parse_response",
+            decision="no_response",
+            reason="no reply received — will retry per stopping rules",
+            prev_hash=state["prev_audit_hash"],
+        )
+        return {
+            **state,
+            "last_extracted_intent": "no_response",
+            "extraction_confidence": None,
+            "hostile_tone": None,
+            "prev_audit_hash": new_hash,
+        }
+
     prompt = _build_extraction_prompt(state, reply_text)
     extracted = call_with_structured_output(prompt, ExtractedResponse)
 
