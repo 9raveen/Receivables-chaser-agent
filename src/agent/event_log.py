@@ -178,9 +178,17 @@ def get_pending_promise(invoice_id: str) -> Optional[dict]:
 
 def get_broken_promise_streak(invoice_id: str) -> int:
     """
-    Counts consecutive BROKEN (kept=False) promises, most recent first,
-    stopping at the first promise that was kept (True) or is still
-    unresolved (NULL) — or when events run out.
+    Counts consecutive BROKEN (kept=False) promises among RESOLVED
+    history, most recent first — skipping over any currently-PENDING
+    (kept=None) promise rather than stopping at it. A fresh unresolved
+    promise must NOT hide a real broken-promise pattern underneath it:
+    that's exactly the serial-promiser case this trigger exists to catch
+    — a customer who just made ANOTHER promise on top of 2 prior broken
+    ones should still escalate, not get a free pass because their newest
+    promise hasn't come due yet. (Bug found via the Day 10 persona eval
+    harness's serial_promiser test — the original version stopped at the
+    first kept=None row and never reached the broken ones beneath it.)
+    Only an actually-KEPT (True) promise legitimately resets the streak.
     """
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -193,6 +201,8 @@ def get_broken_promise_streak(invoice_id: str) -> int:
 
     streak = 0
     for (kept,) in rows:
+        if kept is None:
+            continue
         if kept is False:
             streak += 1
         else:
