@@ -131,35 +131,266 @@ flowchart TD
 
 ---
 
-## Project structure
+## 📁 Project Structure
 
-```
-├── src/
-│   ├── data/           # schema.py — normalized Pydantic models
-│   ├── adapters/        # Kaggle, synthetic (India/Faker), Razorpay
-│   ├── features/        # leakage-safe feature engineering
-│   ├── models/           # propensity + promise-keep training, SHAP/calibration
-│   ├── agent/
-│   │   ├── state.py       # LangGraph TypedDict state
-│   │   ├── graph.py        # the cyclic state machine
-│   │   ├── inference.py     # single-invoice scoring + SHAP
-│   │   ├── bridge.py         # Invoice <-> InvoiceState
-│   │   ├── event_log.py       # Postgres-backed event log
-│   │   ├── audit_log.py        # SHA-256 hash-chained log
-│   │   ├── db.py                # Postgres connection + schema
-│   │   ├── llm_utils.py          # Gemini structured-output wrapper
-│   │   └── nodes/                 # stopping, intervention, draft_outreach,
-│   │                                 parse_response, hitl
-│   ├── eval/
-│   │   └── persona_harness.py      # 5-persona adversarial eval suite
-│   └── api/
-│       └── main.py                  # FastAPI REST layer
-├── chaser-frontend/       # React + Tailwind (Vite)
-├── configs/policy.yaml     # risk tiers, stopping rules, HITL thresholds
-└── docs/                    # ADRs, compliance framing
+```text
+Chaser.Ai-Receivables-agent/
+│
+├── 📂 src/
+│   │
+│   ├── 📂 data/
+│   │   └── schema.py
+│   │       └── Normalized Pydantic data models
+│   │
+│   ├── 📂 adapters/
+│   │   ├── kaggle_adapter.py
+│   │   ├── synthetic_adapter.py
+│   │   └── razorpay_adapter.py
+│   │       └── External data & payment integrations
+│   │
+│   ├── 📂 features/
+│   │   └── build_features.py
+│   │       └── Leakage-safe temporal feature engineering
+│   │
+│   ├── 📂 models/
+│   │   ├── train_baseline.py
+│   │   ├── promise_keep.py
+│   │   ├── explain.py
+│   │   └── ...
+│   │       └── XGBoost models + SHAP explainability
+│   │
+│   ├── 📂 agent/
+│   │   │
+│   │   ├── state.py
+│   │   │   └── LangGraph shared state definition
+│   │   │
+│   │   ├── graph.py
+│   │   │   └── Stateful cyclic agent graph
+│   │   │
+│   │   ├── inference.py
+│   │   │   └── Invoice scoring + SHAP inference
+│   │   │
+│   │   ├── bridge.py
+│   │   │   └── Invoice ↔ Agent state conversion
+│   │   │
+│   │   ├── llm_utils.py
+│   │   │   └── Gemini structured-output wrapper
+│   │   │
+│   │   ├── event_log.py
+│   │   │   └── Postgres-backed workflow event log
+│   │   │
+│   │   ├── audit_log.py
+│   │   │   └── SHA-256 hash-chained compliance audit log
+│   │   │
+│   │   ├── db.py
+│   │   │   └── Postgres connection + persistence schema
+│   │   │
+│   │   └── 📂 nodes/
+│   │       ├── score_and_route
+│   │       ├── check_stopping_conditions
+│   │       ├── select_intervention
+│   │       ├── draft_outreach
+│   │       ├── parse_response
+│   │       ├── check_hitl_triggers
+│   │       └── handle_hitl_escalation
+│   │           └── Individual agent workflow nodes
+│   │
+│   ├── 📂 eval/
+│   │   └── persona_harness.py
+│   │       └── Adversarial end-to-end evaluation suite
+│   │
+│   └── 📂 api/
+│       └── main.py
+│           └── FastAPI REST API
+│
+├── 📂 chaser-frontend/
+│   ├── src/
+│   ├── public/
+│   ├── package.json
+│   └── ...
+│       └── React + Tailwind dashboard
+│
+├── 📂 configs/
+│   └── policy.yaml
+│       ├── Risk tiers
+│       ├── Stopping rules
+│       ├── Contact windows
+│       └── HITL thresholds
+│
+├── 📂 docs/
+│   ├── 📂 adr/
+│   │   └── Architecture Decision Records
+│   ├── 📂 figures/
+│   │   └── Architecture / evaluation figures
+│   ├── agent-policy-spec.md
+│   └── compliance-framing.md
+│
+├── .env.example
+├── .gitignore
+├── requirements.txt
+└── README.md
 ```
 
----
+### 🔍 Architecture at a Glance
+
+```text
+┌───────────────────────────────────────────────────────────────┐
+│                         DATA SOURCES                          │
+│              Kaggle │ Synthetic │ Razorpay                   │
+└───────────────────────────────┬───────────────────────────────┘
+                                │
+                                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                         ADAPTERS                              │
+│              Normalize external data sources                  │
+└───────────────────────────────┬───────────────────────────────┘
+                                │
+                                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                    FEATURE ENGINEERING                        │
+│        Leakage-safe temporal + behavioral features            │
+└───────────────────────────────┬───────────────────────────────┘
+                                │
+                                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                         ML LAYER                              │
+│                                                               │
+│   XGBoost Propensity       XGBoost Promise-Keep      SHAP      │
+│   Late-payment risk        Promise outcome          Reasons    │
+└───────────────────────────────┬───────────────────────────────┘
+                                │
+                                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                     CHASER AI AGENT                           │
+│                        LangGraph                              │
+│                                                               │
+│  Score → Stop Check → Intervention → Draft → Reply Parse     │
+│    ▲                                                │          │
+│    │                                                ▼          │
+│    └──────── State Re-evaluation ← HITL Check ────────────────┘
+│                                                               │
+│              interrupt() ↔ Command(resume=...)                │
+└───────────────┬───────────────────┬───────────────────────────┘
+                │                   │
+                ▼                   ▼
+       ┌────────────────┐   ┌────────────────────┐
+       │ POLICY ENGINE  │   │  AUDIT + EVENTS    │
+       │                │   │                    │
+       │ Hard stopping  │   │ SHA-256 chain      │
+       │ rules          │   │ State transitions  │
+       │ HITL triggers  │   │ Agent actions      │
+       └────────────────┘   └─────────┬──────────┘
+                                     │
+                                     ▼
+                            ┌──────────────────┐
+                            │  NEON POSTGRES   │
+                            │                  │
+                            │ State +          │
+                            │ Checkpoints +    │
+                            │ Audit trail      │
+                            └────────┬─────────┘
+                                     │
+                                     ▼
+                            ┌──────────────────┐
+                            │    FASTAPI       │
+                            │    REST API      │
+                            └────────┬─────────┘
+                                     │
+                                     ▼
+                            ┌──────────────────┐
+                            │ REACT DASHBOARD  │
+                            │                  │
+                            │ Ledger           │
+                            │ Invoice Detail   │
+                            │ Risk / Status    │
+                            │ Audit Visibility │
+                            └──────────────────┘
+```
+
+### 🧠 Core Agent Execution
+
+The most important part of the repository is `src/agent/`:
+
+```text
+                         Invoice
+                            │
+                            ▼
+                  ┌───────────────────┐
+                  │ score_and_route    │
+                  │                    │
+                  │ XGBoost propensity │
+                  └─────────┬─────────┘
+                            │
+                            ▼
+                  ┌───────────────────┐
+                  │ Stopping Rules     │
+                  │                    │
+                  │ Payment?           │
+                  │ Dispute?           │
+                  │ Max attempts?      │
+                  │ Pending promise?   │
+                  │ Contact window?    │
+                  └─────────┬─────────┘
+                            │
+                       ┌────┴────┐
+                       │         │
+                      STOP     PROCEED
+                       │         │
+                       ▼         ▼
+                      END   Select Intervention
+                                  │
+                                  ▼
+                         Draft Outreach
+                                  │
+                         SHAP + Gemini
+                                  │
+                                  ▼
+                         Buyer receives
+                           message
+                                  │
+                                  ▼
+                         ┌────────────────┐
+                         │ parse_response │
+                         └───────┬────────┘
+                                 │
+                                 ▼
+                         HITL Trigger Check
+                                 │
+                    ┌────────────┴────────────┐
+                    │                         │
+                  ESCALATE                  CONTINUE
+                    │                         │
+                    ▼                         ▼
+              Human Review              Stopping Rules
+                                              │
+                                              ▼
+                                         Next Cycle
+```
+
+### 📦 Layer Responsibilities
+
+| Layer           | Responsibility                                                      |
+| --------------- | ------------------------------------------------------------------- |
+| **Data**        | Defines normalized invoice/customer schemas                         |
+| **Adapters**    | Converts external and synthetic sources into a common format        |
+| **Features**    | Builds leakage-safe temporal and behavioral features                |
+| **Models**      | Predicts payment risk and promise-keep probability                  |
+| **SHAP**        | Converts model predictions into invoice-level explanations          |
+| **Agent**       | Orchestrates the complete receivables recovery workflow             |
+| **Nodes**       | Implements individual decisions/actions in the LangGraph            |
+| **Policy**      | Enforces deterministic business and compliance rules                |
+| **LLM**         | Drafts contextual outreach and extracts buyer intent                |
+| **Persistence** | Stores state, checkpoints, events, and audit history                |
+| **Eval**        | Tests the real agent against adversarial buyer personas             |
+| **API**         | Exposes agent functionality to the frontend                         |
+| **Frontend**    | Provides operational visibility through the receivables dashboard   |
+| **Docs**        | Captures architecture decisions, policies, and compliance reasoning |
+
+### 🔑 Why the Structure Matters
+
+Chaser intentionally separates **prediction, deterministic policy enforcement, LLM reasoning, state orchestration, persistence, and observability**.
+
+The LLM is therefore **not the system of record and not the final compliance authority**. Hard stopping conditions are evaluated in application code before model invocation, while LangGraph manages the long-running stateful workflow and Postgres provides durable checkpointing and audit persistence.
 
 ## Setup
 
