@@ -39,7 +39,10 @@ from src.data.schema import Invoice
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEMO_BATCH_PATH = PROJECT_ROOT / "data" / "synthetic" / "demo_batch.json"
 
-_checkpointer_cm = None
+from psycopg_pool import ConnectionPool
+from psycopg.rows import dict_row
+
+_pool = None
 _app_graph = None
 
 
@@ -47,14 +50,18 @@ _app_graph = None
 async def lifespan(app: FastAPI):
     from langgraph.checkpoint.postgres import PostgresSaver
 
-    global _checkpointer_cm, _app_graph
-    _checkpointer_cm = PostgresSaver.from_conn_string(os.environ["DATABASE_URL"])
-    checkpointer = _checkpointer_cm.__enter__()
-    checkpointer.setup()  # idempotent — safe even though init_schema() already ran separately
+    global _pool, _app_graph
+    _pool = ConnectionPool(
+        conninfo=os.environ["DATABASE_URL"],
+        max_size=5,
+        kwargs={"autocommit": True, "row_factory": dict_row},
+        open=True,
+    )
+    checkpointer = PostgresSaver(_pool)
+    checkpointer.setup()
     _app_graph = build_graph(checkpointer)
     yield
-    _checkpointer_cm.__exit__(None, None, None)
-
+    _pool.close()
 
 app = FastAPI(title="Chaser Agent API", lifespan=lifespan)
 
