@@ -35,7 +35,7 @@ docs/figures/\*.png
 # --- logs (hash-chained audit log output, Day 7+) ---
 
 logs/\*.jsonl
-
+logs/
 # --- OS / editor ---
 
 .DS_Store
