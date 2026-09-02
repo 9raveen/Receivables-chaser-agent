@@ -1,0 +1,132 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --font-body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-paper: #F8F7F4;
+  --color-paper-white: #FFFFFF;
+  --color-paper-dim: #F0EDE4;
+  --color-paper-card: #FFFFFF;
+  --color-ledger-900: #171B24;
+  --color-ledger-800: #1F2633;
+  --color-ledger-700: #2B3548;
+  --color-ledger-500: #4A5468;
+  --color-ledger-400: #6B778D;
+  --color-ledger-300: #8891A1;
+  --color-ledger-200: #C7CCD6;
+  --color-ledger-100: #E4E7EC;
+
+  --color-brass-700: #73551F;
+  --color-brass-600: #8F6C2C;
+  --color-brass-500: #B08D3E;
+  --color-brass-200: #E2D1A6;
+  --color-brass-100: #F1E6CC;
+  --color-brass-50: #FBF8F0;
+
+  --color-risk-high: #A5432F;
+  --color-risk-high-bg: #F9ECE8;
+  --color-risk-high-border: #E8BDB4;
+
+  --color-risk-med: #A9761F;
+  --color-risk-med-bg: #FAF2E3;
+  --color-risk-med-border: #EAD09D;
+
+  --color-risk-low: #2E6B4D;
+  --color-risk-low-bg: #E6F2EB;
+  --color-risk-low-border: #A3D1B8;
+}
+
+html {
+  background-color: var(--color-paper);
+  color: var(--color-ledger-900);
+  font-family: var(--font-body);
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background-color: var(--color-paper);
+  color: var(--color-ledger-900);
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: var(--font-display);
+  font-feature-settings: "ss01" 1;
+}
+
+.font-mono-tab {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hairline borders respecting the paper ledger */
+.hairline {
+  border-color: var(--color-ledger-100);
+}
+
+.hairline-strong {
+  border-color: var(--color-ledger-200);
+}
+
+/* Crisp white ledger card */
+.ledger-card {
+  background-color: var(--color-paper-card);
+  border: 1px solid var(--color-ledger-100);
+  box-shadow: 0 1px 3px 0 rgba(23, 27, 36, 0.04), 0 1px 2px -1px rgba(23, 27, 36, 0.03);
+}
+
+.ledger-card-hover {
+  transition: all 0.15s ease-in-out;
+}
+
+.ledger-card-hover:hover {
+  border-color: var(--color-brass-500);
+  box-shadow: 0 4px 12px 0 rgba(23, 27, 36, 0.06);
+}
+
+/* Signature hash-chain connector line */
+.chain-connector {
+  width: 2px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--color-brass-500) 0,
+    var(--color-brass-500) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-paper);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-ledger-200);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ledger-300);
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
